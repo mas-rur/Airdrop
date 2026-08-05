@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+:root {
+  /* Light, editorial theme in the style of chain.base.org/vibenet --
+     white surfaces, soft lavender-gray panels, near-black text, and a
+     single accent color used sparingly for links/actions. */
+  --background: #ffffff;
+  --surface: #f5f6fb;
+  --surface-strong: #eef0f8;
+  --border: #e6e7f0;
+  --foreground: #14151a;
+  --muted: #86899a;
+  --accent: #67c6fe;
+  --accent-ink: #0a2a3d; /* readable text/icon color on top of a solid accent fill */
+  --accent-link: color-mix(in srgb, var(--accent) 58%, black); /* same hue, darkened for legible link text on white */
+  --danger: #e5484d;
+  --success: #17a35a;
+  --font-sans: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-link: var(--accent-link);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --font-sans: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* thin, deliberate scrollbar to match the editorial feel */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+/* subtle "just landed" pulse for fresh rows in tables */
+@keyframes row-in {
+  from {
+    background-color: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.row-fresh {
+  animation: row-in 2.5s ease-out;
+}
+
+/* wheel spin animation -- rotation amount is set inline per-spin via a CSS var */
+@keyframes wheel-spin {
+  from {
+    transform: rotate(var(--wheel-start, 0deg));
+  }
+  to {
+    transform: rotate(var(--wheel-end, 0deg));
+  }
+}
+.wheel-spinning {
+  animation: wheel-spin 4.2s cubic-bezier(0.17, 0.67, 0.12, 0.99) forwards;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.pop-in {
+  animation: pop-in 0.35s ease-out;
+}
