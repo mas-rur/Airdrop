@@ -45,7 +45,7 @@ export function FlickerSpinner({
   }, [grids.length, intervalMs]);
 
   const cells = grids[frame] ?? grids[0] ?? [];
-  const cols = columns ?? Math.round(Math.sqrt(cells.length)) || 7;
+  const cols = columns ?? (Math.round(Math.sqrt(cells.length)) || 7);
 
   return (
     <div
