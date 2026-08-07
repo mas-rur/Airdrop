@@ -3,26 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { rpc, type Account, type HistoryEvent } from "./rpc";
 import { REWARD_ADDRESS, SPIN_TX_AMOUNT } from "./airdrop-config";
-import { getAccountState } from "./airdrop-storage";
+import { claimRewardTxs, getAccountState, type AccountState } from "./airdrop-storage";
 
-export interface AirdropStats {
-  loading: boolean;
-  error: string | null;
-  account: Account | null;
-  totalTxCount: number;
-  qualifyingTxCount: number;
-  qualifyingHistory: HistoryEvent[];
-  points: number;
-  spinsEarned: number;
-  spinsUsed: number;
-  spinsAvailable: number;
-  refresh: () => Promise<void>;
-}
-
-export function useAirdropStats(address: string | null): AirdropStats {
+export function useAirdropStats(address: string | null) {
   const [account, setAccount] = useState<Account | null>(null);
   const [history, setHistory] = useState<HistoryEvent[]>([]);
-  const [spinsUsed, setSpinsUsed] = useState(0);
+  const [state, setState] = useState<AccountState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,13 +17,27 @@ export function useAirdropStats(address: string | null): AirdropStats {
     setLoading(true);
     setError(null);
     try {
-      const [acct, hist] = await Promise.all([
-        rpc.account(address),
-        rpc.history(address),
-      ]);
+      const [acct, hist] = await Promise.all([rpc.account(address), rpc.history(address)]);
       setAccount(acct);
       setHistory(hist.history);
-      setSpinsUsed(getAccountState(address).spinsUsed);
+
+      // Every confirmed qualifying transaction gets claimed, not just the
+      // newest one -- so if someone sent 5 in a row (or their history
+      // simply hadn't been reconciled yet), all 5 count now.
+      const qualifying = hist.history.filter(
+        (e) =>
+          e.direction === "sent" &&
+          e.counterparty.toLowerCase() === REWARD_ADDRESS.toLowerCase() &&
+          e.amount === SPIN_TX_AMOUNT
+      );
+      if (qualifying.length > 0) {
+        await claimRewardTxs(
+          address,
+          qualifying.map((e) => ({ txHash: e.tx_hash, amount: e.amount, block: e.block }))
+        );
+      }
+
+      setState(await getAccountState(address));
     } catch (e) {
       setError(e instanceof Error ? e.message : "lookup failed");
     } finally {
@@ -45,10 +45,23 @@ export function useAirdropStats(address: string | null): AirdropStats {
     }
   }, [address]);
 
+  const refreshLocal = useCallback(async () => {
+    if (!address) return;
+    try {
+      setState(await getAccountState(address));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "lookup failed");
+    }
+  }, [address]);
+
   useEffect(() => {
-    setAccount(null);
-    setHistory([]);
-    if (address) refresh();
+    if (!address) {
+      setAccount(null);
+      setHistory([]);
+      setState(null);
+      return;
+    }
+    refresh();
   }, [address, refresh]);
 
   const qualifyingHistory = history.filter(
@@ -57,22 +70,25 @@ export function useAirdropStats(address: string | null): AirdropStats {
       e.counterparty.toLowerCase() === REWARD_ADDRESS.toLowerCase() &&
       e.amount === SPIN_TX_AMOUNT
   );
-  const qualifyingTxCount = qualifyingHistory.length;
-  const points = qualifyingTxCount;
-  const spinsEarned = qualifyingTxCount;
+  const totalTxCount = history.length;
+  const spinsEarned = state?.spinsEarned ?? 0;
+  const spinsUsed = state?.spinsUsed ?? 0;
   const spinsAvailable = Math.max(0, spinsEarned - spinsUsed);
+  const points = spinsEarned;
 
   return {
-    loading,
-    error,
     account,
-    totalTxCount: history.length,
-    qualifyingTxCount,
+    history,
     qualifyingHistory,
+    totalTxCount,
     points,
     spinsEarned,
     spinsUsed,
     spinsAvailable,
+    state,
+    loading,
+    error,
     refresh,
+    refreshLocal,
   };
 }
