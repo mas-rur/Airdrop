@@ -9,9 +9,15 @@ import { SpinWheel, WheelLegend, SLICE_DEG } from "@/components/SpinWheel";
 import { pickRewardTier } from "@/lib/wheel-math";
 import { REWARD_TIERS, type RewardTier } from "@/lib/airdrop-config";
 import { TokenIcon } from "@/components/icons/TokenIcons";
-import { Card, Button } from "@/components/ui";
+import { Card, Button, ErrorText } from "@/components/ui";
 
 const EXTRA_SPINS = 6;
+const BATCH_PAUSE_MS = 550;
+
+interface BatchEntry {
+  id: string;
+  tier: RewardTier;
+}
 
 export default function SpinPage() {
   const { address, mounted } = useAddress();
@@ -22,7 +28,10 @@ export default function SpinPage() {
   const [spinKey, setSpinKey] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState<RewardTier | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [batchLog, setBatchLog] = useState<BatchEntry[]>([]);
   const pendingTier = useRef<RewardTier | null>(null);
+  const queueRemaining = useRef(0);
 
   if (!mounted) return <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6" />;
 
@@ -41,17 +50,15 @@ export default function SpinPage() {
     );
   }
 
-  function spin() {
-    if (stats.spinsAvailable <= 0 || spinning) return;
+  function spinOnce() {
+    if (spinning) return;
 
     const tier = pickRewardTier();
     pendingTier.current = tier;
     setResult(null);
+    setError(null);
 
-    const sliceIndex = Math.max(
-      0,
-      REWARD_TIERS.findIndex((t) => t.id === tier.id)
-    );
+    const sliceIndex = Math.max(0, REWARD_TIERS.findIndex((t) => t.id === tier.id));
     const sliceCenter = (sliceIndex + 0.5) * SLICE_DEG;
     const jitter = (Math.random() - 0.5) * (SLICE_DEG * 0.6);
     const targetWithinSlice = (((sliceCenter + jitter) % 360) + 360) % 360;
@@ -66,10 +73,19 @@ export default function SpinPage() {
     setSpinning(true);
   }
 
-  function handleSettled() {
+  function startBatch(count: number) {
+    const n = Math.min(count, stats.spinsAvailable);
+    if (n <= 0 || spinning) return;
+    setBatchLog([]);
+    queueRemaining.current = n;
+    spinOnce();
+  }
+
+  async function handleSettled() {
     setSpinning(false);
     const tier = pendingTier.current;
     if (!tier || !address) return;
+    pendingTier.current = null;
 
     const spinResult: SpinResult = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -79,11 +95,31 @@ export default function SpinPage() {
       token: tier.token,
       timestamp: Date.now(),
     };
-    recordSpin(address, spinResult);
-    setResult(tier);
-    pendingTier.current = null;
-    stats.refresh();
+
+    try {
+      const spent = await recordSpin(address, spinResult);
+      if (!spent) {
+        setError("No spin credit was available for that -- refresh and try again.");
+        queueRemaining.current = 0;
+        return;
+      }
+      setResult(tier);
+      setBatchLog((log) => [...log, { id: spinResult.id, tier }]);
+      await stats.refreshLocal();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "couldn't save that spin");
+      queueRemaining.current = 0;
+      return;
+    }
+
+    queueRemaining.current -= 1;
+    if (queueRemaining.current > 0) {
+      setTimeout(spinOnce, BATCH_PAUSE_MS);
+    }
   }
+
+  const inBatch = queueRemaining.current > 0 || spinning;
+  const wonCount = batchLog.filter((e) => e.tier.amount).length;
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 sm:py-10">
@@ -103,27 +139,67 @@ export default function SpinPage() {
           onSettled={handleSettled}
         />
 
-        <div className="mt-8 flex justify-center">
-          <Button onClick={spin} disabled={stats.spinsAvailable <= 0 || spinning}>
-            {spinning ? "Spinning..." : stats.spinsAvailable > 0 ? "Spin" : "No spins available"}
+        <div className="mt-8 flex flex-wrap justify-center gap-2.5">
+          <Button onClick={() => startBatch(1)} disabled={stats.spinsAvailable <= 0 || inBatch}>
+            {spinning ? "Spinning..." : "Spin"}
           </Button>
+          {stats.spinsAvailable >= 2 && (
+            <Button
+              variant="outline"
+              onClick={() => startBatch(5)}
+              disabled={stats.spinsAvailable <= 0 || inBatch}
+            >
+              Spin x5
+            </Button>
+          )}
+          {stats.spinsAvailable >= 2 && (
+            <Button
+              variant="outline"
+              onClick={() => startBatch(stats.spinsAvailable)}
+              disabled={stats.spinsAvailable <= 0 || inBatch}
+            >
+              Spin all ({stats.spinsAvailable})
+            </Button>
+          )}
         </div>
 
+        {error && <ErrorText>{error}</ErrorText>}
+
         {result && !spinning && (
-          <div className="pop-in mt-6 rounded-xl bg-surface px-4 py-4 text-center">
+          <div key={batchLog.length} className="pop-in mt-6 rounded-xl bg-surface px-4 py-4 text-center">
             {result.amount && result.token ? (
               <div className="flex items-center justify-center gap-2.5">
-                <TokenIcon token={result.token} width={30} height={30} />
+                <TokenIcon token={result.token} size={30} />
                 <span className="font-sans text-lg font-semibold">{result.label}</span>
               </div>
             ) : (
               <span className="font-sans text-base font-medium text-muted">{result.label}</span>
             )}
-            <p className="text-[11px] text-muted mt-2">
-              {result.amount
-                ? "Added to your provisional balance -- see the Rewards page."
-                : "No reward this time -- come back after your next confirmed transaction."}
+            {queueRemaining.current > 0 && (
+              <p className="text-[11px] text-muted mt-2">
+                Next spin in a moment -- {queueRemaining.current} left in this batch.
+              </p>
+            )}
+          </div>
+        )}
+
+        {batchLog.length > 1 && !inBatch && (
+          <div className="mt-4 rounded-xl bg-surface px-4 py-3">
+            <p className="text-xs font-medium mb-2">
+              Batch done: {wonCount} of {batchLog.length} won something.
             </p>
+            <div className="flex flex-wrap gap-1.5">
+              {batchLog.map((e) => (
+                <span
+                  key={e.id}
+                  className={`rounded-full px-2.5 py-1 text-[11px] ${
+                    e.tier.amount ? "bg-success/10 text-success" : "bg-border text-muted"
+                  }`}
+                >
+                  {e.tier.label}
+                </span>
+              ))}
+            </div>
           </div>
         )}
 
