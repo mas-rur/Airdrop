@@ -3,30 +3,18 @@
 import { useState } from "react";
 import { Card, Input, Button, Label, ErrorText } from "@/components/ui";
 import { useAddress } from "@/components/shell/AddressProvider";
-import { isValidAddress } from "@/lib/format";
-import { addressFromPrivateKey } from "@/lib/signer";
+import { shortenAddress } from "@/lib/format";
 
 export function ConnectPanel() {
-  const { connect, connectWithKey } = useAddress();
-  const [address, setAddressInput] = useState("");
-  const [showKeyPanel, setShowKeyPanel] = useState(false);
+  const { connectWithKey, rememberedAddress } = useAddress();
   const [privateKey, setPrivateKey] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function handleConnect() {
-    if (!isValidAddress(address)) {
-      setError("Enter a valid 0x... address");
-      return;
-    }
-    setError(null);
-    connect(address.trim());
-  }
-
-  function handleConnectWithKey() {
     try {
-      addressFromPrivateKey(privateKey.trim()); // validates format
-      setError(null);
       connectWithKey(privateKey);
+      setError(null);
+      setPrivateKey("");
     } catch {
       setError("That doesn't look like a valid private key");
     }
@@ -34,63 +22,46 @@ export function ConnectPanel() {
 
   return (
     <Card>
-      <h1 className="font-sans text-xl font-semibold mb-1.5">Connect your wallet</h1>
+      <h1 className="font-sans text-xl font-semibold mb-1.5">
+        Connect with your private key
+      </h1>
       <p className="text-sm text-muted mb-5">
-        Enter the public address of your{" "}
-        <span className="text-foreground">testnet.pay3.space</span> wallet to
-        see your balance, transactions, and airdrop points. This only reads
-        public on-chain data -- your private key is never needed here.
+        This is intentionally not just a public address field: pasting in
+        someone else&apos;s address used to let anyone view (and even spin
+        for) an account that wasn&apos;t theirs. Your key proves it&apos;s
+        actually your account. It&apos;s signed and used entirely in your
+        browser, kept in memory for this tab only, and{" "}
+        <span className="text-foreground">never saved anywhere</span> --
+        gone the moment you refresh or close the tab.
       </p>
+
+      {rememberedAddress && (
+        <p className="text-xs text-muted mb-4">
+          Last connected as{" "}
+          <span className="font-mono text-foreground">
+            {shortenAddress(rememberedAddress, 6)}
+          </span>
+          . Paste that account&apos;s key below to reconnect.
+        </p>
+      )}
 
       <div className="space-y-3">
         <div>
-          <Label>Wallet address</Label>
+          <Label>Private key</Label>
           <Input
-            value={address}
-            onChange={(e) => setAddressInput(e.target.value)}
+            type="password"
+            value={privateKey}
+            onChange={(e) => setPrivateKey(e.target.value)}
             placeholder="0x..."
             onKeyDown={(e) => e.key === "Enter" && handleConnect()}
           />
         </div>
-        <Button onClick={handleConnect} disabled={!isValidAddress(address)}>
+        <Button onClick={handleConnect} disabled={!privateKey.trim()}>
           Connect
         </Button>
       </div>
 
       {error && <ErrorText>{error}</ErrorText>}
-
-      <div className="mt-6 pt-5 border-t border-border">
-        {!showKeyPanel ? (
-          <button
-            onClick={() => setShowKeyPanel(true)}
-            className="font-mono text-[11px] uppercase tracking-widest text-muted hover:text-foreground"
-          >
-            Want to send the qualifying transaction from here instead? &rarr;
-          </button>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-xs text-muted">
-              Optional, for convenience only. Signs and sends transactions
-              entirely in your browser -- the key is kept in memory for this
-              tab and is <span className="text-foreground">never saved</span>,
-              gone as soon as you refresh or close it.
-            </p>
-            <div>
-              <Label>Private key</Label>
-              <Input
-                type="password"
-                value={privateKey}
-                onChange={(e) => setPrivateKey(e.target.value)}
-                placeholder="0x..."
-                onKeyDown={(e) => e.key === "Enter" && handleConnectWithKey()}
-              />
-            </div>
-            <Button variant="outline" onClick={handleConnectWithKey} disabled={!privateKey.trim()}>
-              Connect with key
-            </Button>
-          </div>
-        )}
-      </div>
     </Card>
   );
 }
