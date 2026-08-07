@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAddress } from "@/components/shell/AddressProvider";
 import {
   getAccountState,
   setWithdrawMethod,
+  type AccountState,
   type WithdrawMethod,
 } from "@/lib/airdrop-storage";
 import {
@@ -17,7 +18,9 @@ import {
 } from "@/lib/airdrop-config";
 import { TokenIcon } from "@/components/icons/TokenIcons";
 import { EvmWalletIcon } from "@/components/icons/WalletIcon";
-import { IconLock, IconCheck, IconAlert } from "@/components/icons/UiIcons";
+import { IconLock, IconCheck, IconAlert, IconRefresh } from "@/components/icons/UiIcons";
+import { FlickerSpinner } from "@/components/FlickerSpinner";
+import { FLICKER_GRIDS } from "@/lib/flicker-grids";
 import { Card, Panel, Button, Input, Label, Pill, ErrorText, SectionHeading } from "@/components/ui";
 import { isValidAddress, timeAgo } from "@/lib/format";
 
@@ -29,21 +32,35 @@ function oddsLabel(weight: number): string {
 
 export default function RewardsPage() {
   const { address, mounted } = useAddress();
-  const [state, setState] = useState(() => (address ? getAccountState(address) : null));
+  const [state, setState] = useState<AccountState | null>(null);
+  const [loading, setLoading] = useState(false);
   const [evmAddress, setEvmAddress] = useState("");
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!address) return;
-    const s = getAccountState(address);
-    setState(s);
-    setEvmAddress(s.withdrawMethod?.value ?? "");
+    setLoading(true);
+    setError(null);
+    try {
+      const s = await getAccountState(address);
+      setState(s);
+      setEvmAddress(s.withdrawMethod?.value ?? "");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "couldn't load your rewards");
+    } finally {
+      setLoading(false);
+    }
   }, [address]);
+
+  useEffect(() => {
+    if (address) load();
+  }, [address, load]);
 
   if (!mounted) return <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6" />;
 
-  if (!address || !state) {
+  if (!address) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
         <Card>
@@ -58,23 +75,59 @@ export default function RewardsPage() {
     );
   }
 
-  function saveWithdrawMethod() {
+  if (!state) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
+        <Card>
+          <div className="flex items-center gap-3">
+            <FlickerSpinner grids={FLICKER_GRIDS} onColor="#67c6fe" offColor="#e6e7f0" size={4} gap={2} />
+            <span className="text-sm text-muted">
+              {error ? error : "Loading your rewards..."}
+            </span>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  async function saveWithdrawMethod() {
     if (!address) return;
     if (!isValidAddress(evmAddress)) {
       setError("Enter a valid 0x... EVM address");
       return;
     }
     setError(null);
-    const method: WithdrawMethod = { type: "evm", value: evmAddress.trim() };
-    setWithdrawMethod(address, method);
-    setState(getAccountState(address));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setSaving(true);
+    try {
+      const method: WithdrawMethod = { type: "evm", value: evmAddress.trim() };
+      await setWithdrawMethod(address, method);
+      await load();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "couldn't save that");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 sm:py-10 space-y-6">
-      <h1 className="font-sans text-2xl font-semibold tracking-tight">Rewards</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="font-sans text-2xl font-semibold tracking-tight">Rewards</h1>
+        <button
+          onClick={load}
+          disabled={loading}
+          aria-label="Refresh"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-foreground disabled:opacity-40"
+        >
+          {loading ? (
+            <FlickerSpinner grids={FLICKER_GRIDS} onColor="#67c6fe" offColor="#e6e7f0" size={3} gap={1.5} />
+          ) : (
+            <IconRefresh width={16} height={16} />
+          )}
+        </button>
+      </div>
 
       <Card>
         <div className="flex items-start justify-between gap-3 mb-4">
@@ -87,7 +140,7 @@ export default function RewardsPage() {
 
         <div className="grid grid-cols-2 gap-3">
           <Panel className="flex items-center gap-3">
-            <TokenIcon token="USDT" width={32} height={32} />
+            <TokenIcon token="USDT" size={32} />
             <div>
               <div className="font-mono text-[11px] uppercase tracking-widest text-muted">USDT</div>
               <div className="font-sans text-lg font-semibold tabular-nums">
@@ -96,7 +149,7 @@ export default function RewardsPage() {
             </div>
           </Panel>
           <Panel className="flex items-center gap-3">
-            <TokenIcon token="USDC" width={32} height={32} />
+            <TokenIcon token="USDC" size={32} />
             <div>
               <div className="font-mono text-[11px] uppercase tracking-widest text-muted">USDC</div>
               <div className="font-sans text-lg font-semibold tabular-nums">
@@ -109,11 +162,10 @@ export default function RewardsPage() {
         <div className="mt-4 flex items-start gap-2 rounded-xl bg-surface px-3.5 py-3">
           <IconAlert width={15} height={15} className="text-muted shrink-0 mt-0.5" />
           <p className="text-[11px] text-muted leading-relaxed">
-            These are testnet points tracked in your browser, denominated in
-            USDT/USDC for reference -- not a real token balance and not a
-            guarantee of payout. They unlock only if/when Pay3 mainnet
-            launches. No minimum withdrawal, no withdrawal fee, whenever
-            that happens.
+            These are testnet points, denominated in USDT/USDC for
+            reference -- not a real token balance and not a guarantee of
+            payout. They unlock only if/when Pay3 mainnet launches. No
+            minimum withdrawal, no withdrawal fee, whenever that happens.
           </p>
         </div>
       </Card>
@@ -122,9 +174,8 @@ export default function RewardsPage() {
         <SectionHeading title="Withdrawal preference" />
         <p className="text-xs text-muted mb-4">
           Save the EVM wallet address you&apos;d want a future payout sent
-          to. This is stored only in this browser -- there&apos;s no live
-          withdrawal system yet, so nothing is requested or sent anywhere by
-          saving it.
+          to. There&apos;s no live withdrawal system yet, so nothing is
+          requested or sent anywhere by saving it.
         </p>
 
         <div className="flex items-center gap-3 mb-4">
@@ -141,8 +192,8 @@ export default function RewardsPage() {
               placeholder="0x..."
             />
           </div>
-          <Button onClick={saveWithdrawMethod} disabled={!evmAddress.trim()}>
-            {saved ? "Saved" : "Save"}
+          <Button onClick={saveWithdrawMethod} disabled={!evmAddress.trim() || saving}>
+            {saving ? "Saving..." : saved ? "Saved" : "Save"}
           </Button>
           {error && <ErrorText>{error}</ErrorText>}
         </div>
@@ -177,7 +228,7 @@ export default function RewardsPage() {
             {state.spinHistory.slice(0, 20).map((s) => (
               <div key={s.id} className="py-3 flex items-center gap-3 text-sm">
                 {s.token ? (
-                  <TokenIcon token={s.token} width={22} height={22} />
+                  <TokenIcon token={s.token} size={22} />
                 ) : (
                   <span className="h-[22px] w-[22px] rounded-full bg-surface shrink-0" />
                 )}
