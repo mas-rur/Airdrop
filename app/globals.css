@@ -71,17 +71,17 @@ body {
   animation: row-in 2.5s ease-out;
 }
 
-/* wheel spin animation -- rotation amount is set inline per-spin via a CSS var */
-@keyframes wheel-spin {
+/* reel picker scroll animation -- offset is set inline per-spin via a CSS var */
+@keyframes reel-spin {
   from {
-    transform: rotate(var(--wheel-start, 0deg));
+    transform: translateY(var(--reel-start, 0px));
   }
   to {
-    transform: rotate(var(--wheel-end, 0deg));
+    transform: translateY(var(--reel-end, 0px));
   }
 }
-.wheel-spinning {
-  animation: wheel-spin 4.2s cubic-bezier(0.17, 0.67, 0.12, 0.99) forwards;
+.reel-spinning {
+  animation: reel-spin 3.6s cubic-bezier(0.13, 0.85, 0.15, 1) forwards;
 }
 
 @keyframes pop-in {
