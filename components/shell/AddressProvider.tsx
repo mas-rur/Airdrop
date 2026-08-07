@@ -8,22 +8,24 @@ import {
   type ReactNode,
 } from "react";
 import {
-  getConnectedAddress,
-  setConnectedAddress,
-  disconnect as disconnectStorage,
+  getRememberedAddress,
+  setRememberedAddress,
+  forgetRememberedAddress,
 } from "@/lib/airdrop-storage";
 import { addressFromPrivateKey } from "@/lib/signer";
 
 interface AddressValue {
+  /** Only ever set together with sessionPrivateKey -- there's no more
+   *  "view any address" mode, see ConnectPanel.tsx for why. */
   address: string | null;
   mounted: boolean;
-  /** Only set when the person pastes a key via the optional signer panel.
-   *  Lives in React state alone -- never written to storage, gone on
+  /** Lives in React state alone -- never written to storage, gone on
    *  refresh or full reload. */
   sessionPrivateKey: string | null;
-  connect: (address: string) => void;
+  /** Public address remembered from the last session, for a
+   *  "reconnect as 0x1234...5678" prompt. Not a live session. */
+  rememberedAddress: string | null;
   connectWithKey: (privateKey: string) => string;
-  clearSessionKey: () => void;
   disconnect: () => void;
 }
 
@@ -32,40 +34,46 @@ const AddressContext = createContext<AddressValue | null>(null);
 export function AddressProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
   const [sessionPrivateKey, setSessionPrivateKey] = useState<string | null>(null);
+  const [rememberedAddress, setRememberedAddressState] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setAddress(getConnectedAddress());
+    setRememberedAddressState(getRememberedAddress());
     setMounted(true);
   }, []);
 
-  function connect(addr: string) {
-    setConnectedAddress(addr);
-    setAddress(addr.toLowerCase());
-    setSessionPrivateKey(null);
-  }
-
   function connectWithKey(privateKey: string): string {
-    const derived = addressFromPrivateKey(privateKey);
-    setConnectedAddress(derived);
-    setAddress(derived.toLowerCase());
+    const derived = addressFromPrivateKey(privateKey).toLowerCase();
+    setRememberedAddress(derived);
+    setRememberedAddressState(derived);
+    setAddress(derived);
     setSessionPrivateKey(privateKey.trim());
     return derived;
   }
 
-  function clearSessionKey() {
-    setSessionPrivateKey(null);
-  }
-
-  function disconnect() {
-    disconnectStorage();
+  function clearSession() {
     setAddress(null);
     setSessionPrivateKey(null);
   }
 
+  function forgetRemembered() {
+    forgetRememberedAddress();
+    setRememberedAddressState(null);
+  }
+
   return (
     <AddressContext.Provider
-      value={{ address, mounted, sessionPrivateKey, connect, connectWithKey, clearSessionKey, disconnect }}
+      value={{
+        address,
+        mounted,
+        sessionPrivateKey,
+        rememberedAddress,
+        connectWithKey,
+        disconnect: () => {
+          clearSession();
+          forgetRemembered();
+        },
+      }}
     >
       {children}
     </AddressContext.Provider>

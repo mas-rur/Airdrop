@@ -26,6 +26,7 @@ export function TopNav({ address }: { address: string | null }) {
               <Link
                 key={href}
                 href={href}
+                id={`tour-nav-${label.toLowerCase()}`}
                 className={`shrink-0 flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition-colors ${
                   active
                     ? "bg-surface text-foreground"
