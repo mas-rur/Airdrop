@@ -1,54 +1,56 @@
-import type { SVGProps } from "react";
+"use client";
+
+import { useState } from "react";
+import type { TokenSymbol } from "@/lib/airdrop-config";
 
 /**
- * Deliberately generic: a colored circle with a text monogram, not a
- * reproduction of Tether's or Circle's actual logo mark. The distinctive
- * graphic symbols are their trademarks -- recreating the recognizable
- * shape would defeat the point of avoiding that, even redrawn by hand.
- * Brand color is used only as a legibility cue for which token is which.
+ * Hotlinks the official logo images directly from their source (Wikimedia
+ * Commons for USDT, cryptologos.cc for USDC) rather than copying/hosting
+ * them ourselves -- used purely to identify which stablecoin a reward is
+ * denominated in, same as any exchange or portfolio tracker does. Falls
+ * back to a plain monogram badge if the remote image ever fails to load.
  */
+const LOGO_SRC: Record<TokenSymbol, string> = {
+  USDT: "https://upload.wikimedia.org/wikipedia/commons/0/01/USDT_Logo.png",
+  USDC: "https://cryptologos.cc/logos/usd-coin-usdc-logo.png",
+};
 
-export function UsdtIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 32 32" width={28} height={28} {...props}>
-      <circle cx="16" cy="16" r="16" fill="#26A17B" />
-      <text
-        x="16"
-        y="21"
-        textAnchor="middle"
-        fontSize="10.5"
-        fontWeight="700"
-        fontFamily="system-ui, sans-serif"
-        fill="#fff"
-      >
-        USDT
-      </text>
-    </svg>
-  );
-}
-
-export function UsdcIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 32 32" width={28} height={28} {...props}>
-      <circle cx="16" cy="16" r="16" fill="#2775CA" />
-      <text
-        x="16"
-        y="21"
-        textAnchor="middle"
-        fontSize="10.5"
-        fontWeight="700"
-        fontFamily="system-ui, sans-serif"
-        fill="#fff"
-      >
-        USDC
-      </text>
-    </svg>
-  );
-}
+const FALLBACK_COLOR: Record<TokenSymbol, string> = {
+  USDT: "#26A17B",
+  USDC: "#2775CA",
+};
 
 export function TokenIcon({
   token,
-  ...props
-}: { token: "USDT" | "USDC" } & SVGProps<SVGSVGElement>) {
-  return token === "USDT" ? <UsdtIcon {...props} /> : <UsdcIcon {...props} />;
+  size = 28,
+  className = "",
+}: {
+  token: TokenSymbol;
+  size?: number;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <span
+        className={`flex items-center justify-center rounded-full font-sans text-[9px] font-bold text-white shrink-0 ${className}`}
+        style={{ width: size, height: size, backgroundColor: FALLBACK_COLOR[token] }}
+      >
+        {token}
+      </span>
+    );
+  }
+
+  // eslint-disable-next-line @next/next/no-img-element -- external hotlink, no Next/Image domain config needed
+  return (
+    <img
+      src={LOGO_SRC[token]}
+      alt={token}
+      width={size}
+      height={size}
+      className={`rounded-full object-contain shrink-0 ${className}`}
+      onError={() => setFailed(true)}
+    />
+  );
 }
