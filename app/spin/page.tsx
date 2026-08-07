@@ -5,13 +5,13 @@ import Link from "next/link";
 import { useAddress } from "@/components/shell/AddressProvider";
 import { useAirdropStats } from "@/lib/useAirdropStats";
 import { recordSpin, type SpinResult } from "@/lib/airdrop-storage";
-import { SpinWheel, WheelLegend, SLICE_DEG } from "@/components/SpinWheel";
+import { SpinReel } from "@/components/SpinReel";
 import { pickRewardTier } from "@/lib/wheel-math";
 import { REWARD_TIERS, type RewardTier } from "@/lib/airdrop-config";
 import { TokenIcon } from "@/components/icons/TokenIcons";
 import { Card, Button, ErrorText } from "@/components/ui";
 
-const EXTRA_SPINS = 6;
+const FILLER_COUNT = 24;
 const BATCH_PAUSE_MS = 550;
 
 interface BatchEntry {
@@ -19,12 +19,19 @@ interface BatchEntry {
   tier: RewardTier;
 }
 
+function buildSequence(winner: RewardTier): RewardTier[] {
+  const filler = Array.from(
+    { length: FILLER_COUNT },
+    () => REWARD_TIERS[Math.floor(Math.random() * REWARD_TIERS.length)]
+  );
+  return [...filler, winner];
+}
+
 export default function SpinPage() {
   const { address, mounted } = useAddress();
   const stats = useAirdropStats(address);
 
-  const [wheelStart, setWheelStart] = useState(0);
-  const [wheelEnd, setWheelEnd] = useState(0);
+  const [sequence, setSequence] = useState<RewardTier[]>([REWARD_TIERS[0]]);
   const [spinKey, setSpinKey] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState<RewardTier | null>(null);
@@ -32,6 +39,11 @@ export default function SpinPage() {
   const [batchLog, setBatchLog] = useState<BatchEntry[]>([]);
   const pendingTier = useRef<RewardTier | null>(null);
   const queueRemaining = useRef(0);
+  // Mirrors `spinning` but read synchronously by setTimeout callbacks,
+  // which otherwise capture a stale `spinning` value from the render they
+  // were scheduled in and never see it flip back to false -- that stale
+  // closure was why batch spins used to stop after the first one.
+  const spinningRef = useRef(false);
 
   if (!mounted) return <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6" />;
 
@@ -51,37 +63,28 @@ export default function SpinPage() {
   }
 
   function spinOnce() {
-    if (spinning) return;
+    if (spinningRef.current) return;
 
     const tier = pickRewardTier();
     pendingTier.current = tier;
     setResult(null);
     setError(null);
-
-    const sliceIndex = Math.max(0, REWARD_TIERS.findIndex((t) => t.id === tier.id));
-    const sliceCenter = (sliceIndex + 0.5) * SLICE_DEG;
-    const jitter = (Math.random() - 0.5) * (SLICE_DEG * 0.6);
-    const targetWithinSlice = (((sliceCenter + jitter) % 360) + 360) % 360;
-
-    const currentMod = ((wheelEnd % 360) + 360) % 360;
-    const forward = ((((360 - targetWithinSlice) - currentMod) % 360) + 360) % 360;
-    const newEnd = wheelEnd + forward + EXTRA_SPINS * 360;
-
-    setWheelStart(wheelEnd);
-    setWheelEnd(newEnd);
+    setSequence(buildSequence(tier));
     setSpinKey((k) => k + 1);
+    spinningRef.current = true;
     setSpinning(true);
   }
 
   function startBatch(count: number) {
     const n = Math.min(count, stats.spinsAvailable);
-    if (n <= 0 || spinning) return;
+    if (n <= 0 || spinningRef.current) return;
     setBatchLog([]);
     queueRemaining.current = n;
     spinOnce();
   }
 
   async function handleSettled() {
+    spinningRef.current = false;
     setSpinning(false);
     const tier = pendingTier.current;
     if (!tier || !address) return;
@@ -120,6 +123,12 @@ export default function SpinPage() {
 
   const inBatch = queueRemaining.current > 0 || spinning;
   const wonCount = batchLog.filter((e) => e.tier.amount).length;
+  const totalsByToken = batchLog.reduce<Record<string, number>>((acc, e) => {
+    if (e.tier.amount && e.tier.token) {
+      acc[e.tier.token] = (acc[e.tier.token] ?? 0) + e.tier.amount;
+    }
+    return acc;
+  }, {});
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 sm:py-10">
@@ -131,15 +140,14 @@ export default function SpinPage() {
       </div>
 
       <Card>
-        <SpinWheel
+        <SpinReel
+          sequence={sequence}
           spinKey={spinKey}
-          startDeg={wheelStart}
-          endDeg={wheelEnd}
           spinning={spinning}
           onSettled={handleSettled}
         />
 
-        <div className="mt-8 flex flex-wrap justify-center gap-2.5">
+        <div className="mt-6 flex flex-wrap justify-center gap-2.5">
           <Button onClick={() => startBatch(1)} disabled={stats.spinsAvailable <= 0 || inBatch}>
             {spinning ? "Spinning..." : "Spin"}
           </Button>
@@ -165,29 +173,45 @@ export default function SpinPage() {
 
         {error && <ErrorText>{error}</ErrorText>}
 
-        {result && !spinning && (
+        {result && !spinning && batchLog.length <= 1 && (
           <div key={batchLog.length} className="pop-in mt-6 rounded-xl bg-surface px-4 py-4 text-center">
             {result.amount && result.token ? (
               <div className="flex items-center justify-center gap-2.5">
-                <TokenIcon token={result.token} size={30} />
+                <TokenIcon token={result.token} size={26} />
                 <span className="font-sans text-lg font-semibold">{result.label}</span>
               </div>
             ) : (
               <span className="font-sans text-base font-medium text-muted">{result.label}</span>
             )}
-            {queueRemaining.current > 0 && (
-              <p className="text-[11px] text-muted mt-2">
-                Next spin in a moment -- {queueRemaining.current} left in this batch.
-              </p>
-            )}
           </div>
         )}
 
+        {inBatch && queueRemaining.current > 0 && (
+          <p className="text-[11px] text-muted mt-4 text-center">
+            {queueRemaining.current} more spin{queueRemaining.current === 1 ? "" : "s"} left in
+            this batch...
+          </p>
+        )}
+
         {batchLog.length > 1 && !inBatch && (
-          <div className="mt-4 rounded-xl bg-surface px-4 py-3">
-            <p className="text-xs font-medium mb-2">
-              Batch done: {wonCount} of {batchLog.length} won something.
+          <div className="pop-in mt-6 rounded-xl bg-surface px-4 py-4">
+            <p className="text-sm font-semibold mb-1">
+              Batch complete -- {wonCount} of {batchLog.length} won something
             </p>
+            {Object.keys(totalsByToken).length > 0 ? (
+              <div className="flex flex-wrap gap-4 mb-3">
+                {Object.entries(totalsByToken).map(([token, total]) => (
+                  <div key={token} className="flex items-center gap-2">
+                    <TokenIcon token={token as "USDT" | "USDC"} size={22} />
+                    <span className="font-mono text-sm font-semibold tabular-nums">
+                      +{total.toFixed(2)} {token}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted mb-3">No wins this batch.</p>
+            )}
             <div className="flex flex-wrap gap-1.5">
               {batchLog.map((e) => (
                 <span
@@ -202,12 +226,10 @@ export default function SpinPage() {
             </div>
           </div>
         )}
-
-        <WheelLegend />
       </Card>
 
       <p className="text-[11px] text-muted mt-4 text-center">
-        Odds aren&apos;t equal per slice -- see the Rewards page for the exact table.
+        Odds aren&apos;t equal across outcomes -- see the Rewards page for the exact table.
       </p>
     </div>
   );
